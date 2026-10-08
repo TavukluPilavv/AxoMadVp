@@ -1,5 +1,8 @@
 package com.example.madenplugin;
 
+import net.luckperms.api.LuckPerms;
+import net.luckperms.api.model.group.Group;
+import net.luckperms.api.node.Node;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -22,6 +25,7 @@ import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
@@ -38,21 +42,31 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
     private final Map<UUID, BukkitRunnable> combatTasks = new HashMap<>();
     private final Map<UUID, BossBar> combatBossBars = new HashMap<>();
     
-    // Maden Bölgesi ve Oran Verileri
     private final Set<String> registeredMadens = new HashSet<>(Arrays.asList("normal", "vip", "oyuncu"));
     private final Map<String, Integer> madenSureleri = new HashMap<>();
     private final Map<String, Map<Material, Integer>> madenOranlari = new HashMap<>();
 
-    // Chat Veri Giriş Takibi
     private final Set<UUID> editingChatInput = new HashSet<>();
     private final Map<UUID, String> editingTargetMaden = new HashMap<>();
     private final Map<UUID, Material> editingTargetBlock = new HashMap<>();
 
+    private LuckPerms luckPerms;
+
     @Override
     public void onEnable() {
+        RegisteredServiceProvider<LuckPerms> provider = Bukkit.getServicesManager().getRegistration(LuckPerms.class);
+        if (provider != null) {
+            luckPerms = provider.getProvider();
+            getLogger().info("LuckPerms başarıyla bağlandı!");
+        } else {
+            getLogger().warning("LuckPerms bulunamadı! /tagizinver komutu çalışmayabilir.");
+        }
+
         getServer().getPluginManager().registerEvents(this, this);
         Objects.requireNonNull(getCommand("maden")).setExecutor(this);
         Objects.requireNonNull(getCommand("maden")).setTabCompleter(this);
+        Objects.requireNonNull(getCommand("tagizinver")).setExecutor(this);
+        Objects.requireNonNull(getCommand("tagizinver")).setTabCompleter(this);
         getLogger().info("MadenPlugin aktif edildi!");
     }
 
@@ -65,6 +79,46 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("tagizinver")) {
+            if (!sender.hasPermission("maden.admin")) {
+                sender.sendMessage(ChatColor.RED + "Bu komutu kullanmak için yetkiniz yok.");
+                return true;
+            }
+
+            if (args.length < 3) {
+                sender.sendMessage(ChatColor.RED + "Kullanım: /tagizinver <rol> <playerkits2.kit.kitadi> <true/false>");
+                return true;
+            }
+
+            if (luckPerms == null) {
+                sender.sendMessage(ChatColor.RED + "LuckPerms eklentisi algılanamadı!");
+                return true;
+            }
+
+            String roleName = args[0];
+            String permission = args[1];
+            boolean value;
+
+            try {
+                value = Boolean.parseBoolean(args[2]);
+            } catch (Exception e) {
+                sender.sendMessage(ChatColor.RED + "Son parametre sadece true veya false olmalıdır!");
+                return true;
+            }
+
+            Group group = luckPerms.getGroupManager().getGroup(roleName);
+            if (group == null) {
+                sender.sendMessage(ChatColor.RED + "Böyle bir tag/rol bulunamadı!");
+                return true;
+            }
+
+            group.data().add(Node.builder(permission).value(value).build());
+            luckPerms.getGroupManager().saveGroup(group);
+
+            sender.sendMessage(ChatColor.GREEN + "'" + roleName + "' rolüne başarıyla '" + permission + "' izni (" + value + ") eklendi!");
+            return true;
+        }
+
         if (!(sender instanceof Player)) {
             sender.sendMessage("Bu komut sadece oyuncular tarafından kullanılabilir.");
             return true;
@@ -139,16 +193,30 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length == 1) {
-            List<String> completions = new ArrayList<>();
-            if (sender.hasPermission("maden.admin")) {
-                completions.add("create");
-                completions.add("edit");
-                completions.add("sure");
+        if (command.getName().equalsIgnoreCase("tagizinver")) {
+            if (args.length == 1 && luckPerms != null) {
+                List<String> groups = new ArrayList<>();
+                for (Group g : luckPerms.getGroupManager().getLoadedGroups()) {
+                    groups.add(g.getName());
+                }
+                return groups;
+            } else if (args.length == 2) {
+                return Collections.singletonList("playerkits2.kit.");
+            } else if (args.length == 3) {
+                return Arrays.asList("true", "false");
             }
-            return completions;
-        } else if (args.length == 2 && (args[0].equalsIgnoreCase("edit") || args[0].equalsIgnoreCase("sure"))) {
-            return new ArrayList<>(registeredMadens);
+        } else if (command.getName().equalsIgnoreCase("maden")) {
+            if (args.length == 1) {
+                List<String> completions = new ArrayList<>();
+                if (sender.hasPermission("maden.admin")) {
+                    completions.add("create");
+                    completions.add("edit");
+                    completions.add("sure");
+                }
+                return completions;
+            } else if (args.length == 2 && (args[0].equalsIgnoreCase("edit") || args[0].equalsIgnoreCase("sure"))) {
+                return new ArrayList<>(registeredMadens);
+            }
         }
         return null;
     }
@@ -179,7 +247,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.openInventory(inv);
     }
 
-    // Oluşturulan Madenlerin Listelendiği ve Sağ Tık ile Silinebildiği Menü
     private void openMadenListMenu(Player player) {
         Inventory inv = Bukkit.createInventory(null, 27, ChatColor.DARK_PURPLE + "Maden Bölgelerini Yönet");
 
@@ -201,11 +268,9 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.openInventory(inv);
     }
 
-    // Seçilen Maden Bölgesinin İçindeki Madenlerin Oranlarının Ayarlandığı Menü
     private void openMadenDetailEditMenu(Player player, String madenName) {
         Inventory inv = Bukkit.createInventory(null, 27, ChatColor.DARK_BLUE + "Düzenle: " + madenName);
 
-        // Netherite Hariç Maden Halleri (Ore)
         Material[] materials = {
             Material.DIAMOND_ORE, Material.GOLD_ORE, Material.EMERALD_ORE,
             Material.IRON_ORE, Material.COAL_ORE, Material.REDSTONE_ORE,
@@ -231,7 +296,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             inv.setItem(i, item);
         }
 
-        // Sağ altta (26. slot) Kaydet / Geri Dön Butonu
         ItemStack backButton = new ItemStack(Material.LIME_CONCRETE);
         ItemMeta backMeta = backButton.getItemMeta();
         if (backMeta != null) {
