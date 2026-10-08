@@ -86,7 +86,9 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             }
 
             if (args.length < 3) {
-                sender.sendMessage(ChatColor.RED + "Kullanım: /tagizinver <rol> <playerkits2.kit.kitadi> <true/false>");
+                sender.sendMessage(ChatColor.RED + "Kullanım: /tagizinver <rol> <izin> <true/false>");
+                sender.sendMessage(ChatColor.GRAY + "Örnek: /tagizinver vip playerkits2.kit.vip true");
+                sender.sendMessage(ChatColor.GRAY + "Örnek: /tagizinver rehber fly true");
                 return true;
             }
 
@@ -201,7 +203,12 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 }
                 return groups;
             } else if (args.length == 2) {
-                return Collections.singletonList("playerkits2.kit.");
+                return Arrays.asList(
+                    "playerkits2.kit.",
+                    "minecraft.command.gamemode",
+                    "bukkit.command.fly",
+                    "essentials.fly"
+                );
             } else if (args.length == 3) {
                 return Arrays.asList("true", "false");
             }
@@ -336,7 +343,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                     String madenName = creatingMaden.get(player.getUniqueId());
                     registeredMadens.add(madenName);
 
-                    // Sadece seçilen alanın içindeki blokları Air (boşluk) yapıyoruz, taban ve zemin etkilenmiyor
                     Location p1 = points[0];
                     Location p2 = points[1];
                     int minX = Math.min(p1.getBlockX(), p2.getBlockX());
