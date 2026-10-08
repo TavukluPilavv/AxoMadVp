@@ -335,7 +335,29 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 if (points[0] != null && points[1] != null) {
                     String madenName = creatingMaden.get(player.getUniqueId());
                     registeredMadens.add(madenName);
-                    player.sendMessage(ChatColor.GOLD + "'" + madenName + "' maden bölgesi başarıyla oluşturuldu! /maden edit yazarak oranları ayarlayabilirsin.");
+
+                    // Sadece seçilen alanın içindeki blokları Air (boşluk) yapıyoruz, taban ve zemin etkilenmiyor
+                    Location p1 = points[0];
+                    Location p2 = points[1];
+                    int minX = Math.min(p1.getBlockX(), p2.getBlockX());
+                    int maxX = Math.max(p1.getBlockX(), p2.getBlockX());
+                    int minY = Math.min(p1.getBlockY(), p2.getBlockY());
+                    int maxY = Math.max(p1.getBlockY(), p2.getBlockY());
+                    int minZ = Math.min(p1.getBlockZ(), p2.getBlockZ());
+                    int maxZ = Math.max(p1.getBlockZ(), p2.getBlockZ());
+
+                    for (int x = minX; x <= maxX; x++) {
+                        for (int y = minY; y <= maxY; y++) {
+                            for (int z = minZ; z <= maxZ; z++) {
+                                Block b = p1.getWorld().getBlockAt(x, y, z);
+                                b.setType(Material.AIR);
+                            }
+                        }
+                    }
+
+                    player.sendMessage(ChatColor.GREEN + "Başarıyla seçildi, alan açılıyor!");
+                    player.sendMessage(ChatColor.GOLD + "'" + madenName + "' maden bölgesi oluşturuldu ve içi boşaltıldı! /maden edit yazarak oranları ayarlayabilirsin.");
+                    
                     creatingMaden.remove(player.getUniqueId());
                     selectionPoints.remove(player.getUniqueId());
                 }
