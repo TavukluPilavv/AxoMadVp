@@ -77,6 +77,27 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         }
     }
 
+    private void sendActionBar(Player player, String message) {
+        player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, net.md_5.bungee.api.chat.TextComponent.fromLegacyText(message));
+    }
+
+    private void startMadenCooldownTimer(Player player, String madenAdi, int sureSaniye) {
+        new BukkitRunnable() {
+            int kalanSure = sureSaniye;
+
+            @Override
+            public void run() {
+                if (kalanSure <= 0) {
+                    sendActionBar(player, ChatColor.GREEN + "'" + madenAdi + "' madeni yenilendi!");
+                    this.cancel();
+                    return;
+                }
+                sendActionBar(player, ChatColor.YELLOW + madenAdi + " madeninin yenilenmesine: " + ChatColor.RED + kalanSure + "s");
+                kalanSure--;
+            }
+        }.runTaskTimer(this, 0L, 20L);
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (command.getName().equalsIgnoreCase("tagizinver")) {
@@ -87,8 +108,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
             if (args.length < 3) {
                 sender.sendMessage(ChatColor.RED + "Kullanım: /tagizinver <rol> <izin> <true/false>");
-                sender.sendMessage(ChatColor.GRAY + "Örnek: /tagizinver vip playerkits2.kit.vip true");
-                sender.sendMessage(ChatColor.GRAY + "Örnek: /tagizinver rehber fly true");
                 return true;
             }
 
@@ -184,6 +203,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 int saniye = Integer.parseInt(args[2]);
                 madenSureleri.put(madenAdi, saniye);
                 player.sendMessage(ChatColor.GREEN + madenAdi + " madeninin yenilenme süresi " + saniye + " saniye olarak ayarlandı!");
+                startMadenCooldownTimer(player, madenAdi, saniye);
             } catch (NumberFormatException e) {
                 player.sendMessage(ChatColor.RED + "Geçerli bir saniye girmelisin!");
             }
@@ -362,7 +382,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                     }
 
                     player.sendMessage(ChatColor.GREEN + "Başarıyla seçildi, alan açılıyor!");
-                    player.sendMessage(ChatColor.GOLD + "'" + madenName + "' maden bölgesi oluşturuldu ve içi boşaltıldı! /maden edit yazarak oranları ayarlayabilirsin.");
+                    player.sendMessage(ChatColor.GOLD + "'" + madenName + "' maden bölgesi oluşturuldu ve içi boşaltıldı! /maden sure <isim> <saniye> komutu ile süre ayarlayabilirsin.");
                     
                     creatingMaden.remove(player.getUniqueId());
                     selectionPoints.remove(player.getUniqueId());
