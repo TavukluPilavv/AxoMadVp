@@ -21,6 +21,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
@@ -45,6 +46,25 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
     private final Set<String> registeredMadens = new HashSet<>(Arrays.asList("normal", "vip", "oyuncu"));
     private final Map<String, Integer> madenSureleri = new HashMap<>();
     private final Map<String, Map<Material, Integer>> madenOranlari = new HashMap<>();
+    
+    // Maden sınırları (Maden adı -> Blok listesi)
+    private final Map<String, List<Block>> madenBloklari = new HashMap<>();
+
+    // İRP (Ölen oyuncu envanter kayıtları)
+    private static class DeathRecord {
+        String victimName;
+        ItemStack[] contents;
+        ItemStack[] armor;
+        long time;
+
+        public DeathRecord(String victimName, ItemStack[] contents, ItemStack[] armor) {
+            this.victimName = victimName;
+            this.contents = contents;
+            this.armor = armor;
+            this.time = System.currentTimeMillis();
+        }
+    }
+    private final List<DeathRecord> deathRecords = new ArrayList<>();
 
     private final Set<UUID> editingChatInput = new HashSet<>();
     private final Map<UUID, String> editingTargetMaden = new HashMap<>();
@@ -67,6 +87,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         Objects.requireNonNull(getCommand("maden")).setTabCompleter(this);
         Objects.requireNonNull(getCommand("tagizinver")).setExecutor(this);
         Objects.requireNonNull(getCommand("tagizinver")).setTabCompleter(this);
+        Objects.requireNonNull(getCommand("irp")).setExecutor(this);
         getLogger().info("MadenPlugin aktif edildi!");
     }
 
@@ -81,25 +102,74 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, net.md_5.bungee.api.chat.TextComponent.fromLegacyText(message));
     }
 
-    private void startMadenCooldownTimer(Player player, String madenAdi, int sureSaniye) {
+    private void startMadenCooldownTimer(String madenAdi, int sureSaniye) {
         new BukkitRunnable() {
             int kalanSure = sureSaniye;
 
             @Override
             public void run() {
                 if (kalanSure <= 0) {
-                    sendActionBar(player, ChatColor.GREEN + "'" + madenAdi + "' madeni yenilendi!");
+                    // Süre bittiğinde oranlara göre blokları rastgele doldur
+                    fillMadenRandomly(madenAdi);
+                    for (Player p : Bukkit.getOnlinePlayers()) {
+                        sendActionBar(p, ChatColor.GREEN + "'" + madenAdi + "' madeni yenilendi!");
+                    }
                     this.cancel();
                     return;
                 }
-                sendActionBar(player, ChatColor.YELLOW + madenAdi + " madeninin yenilenmesine: " + ChatColor.RED + kalanSure + "s");
+                for (Player p : Bukkit.getOnlinePlayers()) {
+                    sendActionBar(p, ChatColor.YELLOW + madenAdi + " madeninin yenilenmesine: " + ChatColor.RED + kalanSure + "s");
+                }
                 kalanSure--;
             }
         }.runTaskTimer(this, 0L, 20L);
     }
 
+    private void fillMadenRandomly(String madenName) {
+        List<Block> blocks = madenBloklari.get(madenName);
+        if (blocks == null || blocks.isEmpty()) return;
+
+        Map<Material, Integer> oranlar = madenOranlari.get(madenName);
+        if (oranlar == null || oranlar.isEmpty()) {
+            // Oran yoksa varsayılan taş yap
+            for (Block b : blocks) {
+                b.setType(Material.STONE);
+            }
+            return;
+        }
+
+        Random random = new Random();
+        for (Block b : blocks) {
+            // Oranlara göre rastgele seçim
+            Material chosenMat = Material.STONE;
+            int roll = random.nextInt(100) + 1;
+            int currentSum = 0;
+            for (Map.Entry<Material, Integer> entry : oranlar.entrySet()) {
+                currentSum += entry.getValue();
+                if (roll <= currentSum) {
+                    chosenMat = entry.getKey();
+                    break;
+                }
+            }
+            b.setType(chosenMat);
+        }
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("irp")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Bu komut sadece oyuncular içindir.");
+                return true;
+            }
+            if (!sender.hasPermission("maden.admin")) {
+                sender.sendMessage(ChatColor.RED + "Bu komutu kullanmak için yetkiniz yok.");
+                return true;
+            }
+            openIrpMenu((Player) sender);
+            return true;
+        }
+
         if (command.getName().equalsIgnoreCase("tagizinver")) {
             if (!sender.hasPermission("maden.admin")) {
                 sender.sendMessage(ChatColor.RED + "Bu komutu kullanmak için yetkiniz yok.");
@@ -203,7 +273,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 int saniye = Integer.parseInt(args[2]);
                 madenSureleri.put(madenAdi, saniye);
                 player.sendMessage(ChatColor.GREEN + madenAdi + " madeninin yenilenme süresi " + saniye + " saniye olarak ayarlandı!");
-                startMadenCooldownTimer(player, madenAdi, saniye);
+                startMadenCooldownTimer(madenAdi, saniye);
             } catch (NumberFormatException e) {
                 player.sendMessage(ChatColor.RED + "Geçerli bir saniye girmelisin!");
             }
@@ -223,12 +293,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 }
                 return groups;
             } else if (args.length == 2) {
-                return Arrays.asList(
-                    "playerkits2.kit.",
-                    "minecraft.command.gamemode",
-                    "bukkit.command.fly",
-                    "essentials.fly"
-                );
+                return Arrays.asList("playerkits2.kit.", "minecraft.command.gamemode", "bukkit.command.fly", "essentials.fly");
             } else if (args.length == 3) {
                 return Arrays.asList("true", "false");
             }
@@ -334,6 +399,54 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.openInventory(inv);
     }
 
+    private void openIrpMenu(Player player) {
+        Inventory inv = Bukkit.createInventory(null, 54, ChatColor.DARK_RED + "Ölen Oyuncular (İRP)");
+
+        int slot = 0;
+        for (int i = deathRecords.size() - 1; i >= 0 && slot < 53; i--) {
+            DeathRecord record = deathRecords.get(i);
+            ItemStack head = new ItemStack(Material.PLAYER_HEAD);
+            ItemMeta meta = head.getItemMeta();
+            if (meta != null) {
+                meta.setDisplayName(ChatColor.YELLOW + record.victimName);
+                meta.setLore(Arrays.asList(
+                    ChatColor.GRAY + "Ölüm Zamanı: " + new Date(record.time).toString(),
+                    ChatColor.GREEN + "Sol Tık: Envanteri İncele"
+                ));
+                head.setItemMeta(meta);
+            }
+            inv.setItem(slot++, head);
+        }
+
+        player.openInventory(inv);
+    }
+
+    private void openInspectInventory(Player player, DeathRecord record) {
+        Inventory inv = Bukkit.createInventory(null, 54, ChatColor.DARK_GRAY + "İncele: " + record.victimName);
+
+        // İçerik eşyaları (0-35)
+        for (int i = 0; i < record.contents.length && i < 36; i++) {
+            inv.setItem(i, record.contents[i]);
+        }
+
+        // Zırhlar ve offhand (36-40)
+        for (int i = 0; i < record.armor.length && (36 + i) < 41; i++) {
+            inv.setItem(36 + i, record.armor[i]);
+        }
+
+        // Sağ altta envanteri geri yükle butonu (Slot 53)
+        ItemStack restoreBtn = new ItemStack(Material.EMERALD_BLOCK);
+        ItemMeta rMeta = restoreBtn.getItemMeta();
+        if (rMeta != null) {
+            rMeta.setDisplayName(ChatColor.GREEN + "Envanteri Geri Yükle");
+            rMeta.setLore(Collections.singletonList(ChatColor.YELLOW + "Tıklayarak oyuncuya eşyalarını ver!"));
+            restoreBtn.setItemMeta(rMeta);
+        }
+        inv.setItem(53, restoreBtn);
+
+        player.openInventory(inv);
+    }
+
     @EventHandler
     public void onPlayerInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
@@ -372,17 +485,20 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                     int minZ = Math.min(p1.getBlockZ(), p2.getBlockZ());
                     int maxZ = Math.max(p1.getBlockZ(), p2.getBlockZ());
 
+                    List<Block> blocks = new ArrayList<>();
                     for (int x = minX; x <= maxX; x++) {
                         for (int y = minY; y <= maxY; y++) {
                             for (int z = minZ; z <= maxZ; z++) {
                                 Block b = p1.getWorld().getBlockAt(x, y, z);
+                                blocks.add(b);
                                 b.setType(Material.AIR);
                             }
                         }
                     }
+                    madenBloklari.put(madenName, blocks);
 
-                    player.sendMessage(ChatColor.GREEN + "Başarıyla seçildi, alan açılıyor!");
-                    player.sendMessage(ChatColor.GOLD + "'" + madenName + "' maden bölgesi oluşturuldu ve içi boşaltıldı! /maden sure <isim> <saniye> komutu ile süre ayarlayabilirsin.");
+                    player.sendMessage(ChatColor.GREEN + "Başarıyla seçildi, alan açıldı!");
+                    player.sendMessage(ChatColor.GOLD + "'" + madenName + "' maden bölgesi oluşturuldu! /maden sure <isim> <saniye> ile süre ayarlayabilirsin.");
                     
                     creatingMaden.remove(player.getUniqueId());
                     selectionPoints.remove(player.getUniqueId());
@@ -423,6 +539,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             } else if (event.isRightClick()) {
                 registeredMadens.remove(madenName);
                 madenOranlari.remove(madenName);
+                madenBloklari.remove(madenName);
                 player.sendMessage(ChatColor.RED + "'" + madenName + "' maden bölgesi silindi.");
                 openMadenListMenu(player);
             }
@@ -445,6 +562,38 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 editingTargetMaden.put(player.getUniqueId(), madenName);
                 editingTargetBlock.put(player.getUniqueId(), clickedItem.getType());
                 player.sendMessage(ChatColor.YELLOW + "Lütfen chat kısmına 0 ile 100 arasında bir oran/miktar giriniz:");
+            }
+        } else if (title.equals(ChatColor.DARK_RED + "Ölen Oyuncular (İRP)")) {
+            event.setCancelled(true);
+            ItemStack clicked = event.getCurrentItem();
+            if (clicked == null || !clicked.hasItemMeta()) return;
+
+            String victimName = ChatColor.stripColor(clicked.getItemMeta().getDisplayName());
+            for (DeathRecord record : deathRecords) {
+                if (record.victimName.equals(victimName)) {
+                    openInspectInventory(player, record);
+                    break;
+                }
+            }
+        } else if (title.startsWith(ChatColor.DARK_GRAY + "İncele: ")) {
+            event.setCancelled(true);
+            String victimName = ChatColor.stripColor(title.replace("İncele: ", ""));
+            if (event.getRawSlot() == 53) {
+                // Envanteri Geri Yükle Butonu
+                for (DeathRecord record : deathRecords) {
+                    if (record.victimName.equals(victimName)) {
+                        Player target = Bukkit.getPlayer(victimName);
+                        if (target != null && target.isOnline()) {
+                            target.getInventory().setContents(record.contents);
+                            target.getInventory().setArmorContents(record.armor);
+                            player.sendMessage(ChatColor.GREEN + victimName + " adlı oyuncunun envanteri başarıyla geri verildi!");
+                            player.closeInventory();
+                        } else {
+                            player.sendMessage(ChatColor.RED + "Oyuncu şu an oyunda değil!");
+                        }
+                        break;
+                    }
+                }
             }
         }
     }
@@ -472,6 +621,16 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             }
 
             Bukkit.getScheduler().runTask(this, () -> openMadenDetailEditMenu(player, madenName));
+        }
+    }
+
+    @EventHandler
+    public void onCommandPreprocess(PlayerCommandPreprocessEvent event) {
+        Player player = event.getPlayer();
+        if (combatMap.containsKey(player.getUniqueId())) {
+            // Savaşta iken komut yazması engelleniyor (admin yetkisi yoksa veya tamamen engellemek istiyorsan)
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "Savaştayken komut kullanamazsın!");
         }
     }
 
@@ -539,6 +698,14 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         Player victim = event.getEntity();
         UUID victimUuid = victim.getUniqueId();
 
+        // İRP için kayıt ekle (Envanter ve zırhları sakla)
+        ItemStack[] contents = victim.getInventory().getContents();
+        ItemStack[] armor = victim.getInventory().getArmorContents();
+        deathRecords.add(new DeathRecord(victim.getName(), contents, armor));
+        if (deathRecords.size() > 54) {
+            deathRecords.remove(0); // Son 54 ölümü tut
+        }
+
         victim.getWorld().spawnParticle(org.bukkit.Particle.EXPLOSION_LARGE, victim.getLocation(), 1);
         victim.getWorld().playSound(victim.getLocation(), Sound.ENTITY_GENERIC_EXPLODE, 0.5f, 1.0f);
 
@@ -546,6 +713,17 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         if (attackerUuid != null) {
             Player attacker = Bukkit.getPlayer(attackerUuid);
             if (attacker != null && attacker.isOnline()) {
+                // Katilin elindeki eşyayı bul
+                ItemStack handItem = attacker.getInventory().getItemInMainHand();
+                String itemName = "eli";
+                if (handItem.getType() != Material.AIR) {
+                    if (handItem.hasItemMeta() && Objects.requireNonNull(handItem.getItemMeta()).hasDisplayName()) {
+                        itemName = handItem.getItemMeta().getDisplayName();
+                    } else {
+                        itemName = handItem.getType().name().toLowerCase().replace("_", " ");
+                    }
+                }
+
                 List<ItemStack> drops = new ArrayList<>(event.getDrops());
                 event.getDrops().clear();
 
@@ -557,7 +735,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                     }
                 }
 
-                String deathMessage = ChatColor.RED + victim.getName() + ChatColor.WHITE + " player item ile " + ChatColor.GREEN + attacker.getName() + ChatColor.WHITE + " tarafından öldürüldü.";
+                String deathMessage = ChatColor.RED + victim.getName() + ChatColor.WHITE + " oyuncusu " + ChatColor.YELLOW + itemName + ChatColor.WHITE + " ile " + ChatColor.GREEN + attacker.getName() + ChatColor.WHITE + " tarafından öldürüldü.";
                 event.setDeathMessage(deathMessage);
                 return;
             }
