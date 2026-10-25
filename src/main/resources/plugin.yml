@@ -5,8 +5,8 @@ main: com.example.madenplugin.MadenPlugin
 api-version: 1.16
 commands:
   maden:
-    description: Maden sistemini yönetir.
+    description: Maden sistemini ve oranlarını yönetir.
   tagizinver:
-    description: LuckPerms yetkisi verir.
+    description: Oyuncu gruplarına özel izinler tanımlar.
   irp:
-    description: Ölen oyuncuların envanterini inceler.
+    description: Ölen oyuncuların envanterlerini inceler ve geri yükler.
