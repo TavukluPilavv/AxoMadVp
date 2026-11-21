@@ -1,10 +1,12 @@
-
 name: MadenPlugin
 version: 1.0
 main: com.example.madenplugin.MadenPlugin
 api-version: 1.16
 commands:
   maden:
-    description: Maden sistemini ve oranlarını yönetir.
+    description: Maden sistemi komutu
   irp:
-    description: Ölen oyuncuların envanterlerini inceler ve geri yükler.
+    description: Ölüm kayıtları komutu
+  sat:
+    description: Otomatik satış komutu
+
