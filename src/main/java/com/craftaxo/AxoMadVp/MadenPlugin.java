@@ -1,13 +1,9 @@
 package com.example.madenplugin;
 
-import net.luckperms.api.LuckPerms;
-import net.luckperms.api.model.group.Group;
-import net.luckperms.api.node.Node;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -21,7 +17,6 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -29,7 +24,6 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
@@ -83,19 +77,10 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
     private final Map<UUID, String> editingTargetMaden = new HashMap<>();
     private final Map<UUID, Material> editingTargetBlock = new HashMap<>();
 
-    private LuckPerms luckPerms;
     private Scoreboard healthScoreboard;
 
     @Override
     public void onEnable() {
-        RegisteredServiceProvider<LuckPerms> provider = Bukkit.getServicesManager().getRegistration(LuckPerms.class);
-        if (provider != null) {
-            luckPerms = provider.getProvider();
-            getLogger().info("LuckPerms başarıyla bağlandı!");
-        } else {
-            getLogger().warning("LuckPerms bulunamadı, tagizinver komutu pasif olacak.");
-        }
-
         basePrices.put(Material.DIAMOND_ORE, 2.3);
         basePrices.put(Material.EMERALD_ORE, 7.0);
         basePrices.put(Material.GOLD_ORE, 5.0);
@@ -117,8 +102,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         getServer().getPluginManager().registerEvents(this, this);
         Objects.requireNonNull(getCommand("maden")).setExecutor(this);
         Objects.requireNonNull(getCommand("maden")).setTabCompleter(this);
-        Objects.requireNonNull(getCommand("tagizinver")).setExecutor(this);
-        Objects.requireNonNull(getCommand("tagizinver")).setTabCompleter(this);
         Objects.requireNonNull(getCommand("irp")).setExecutor(this);
         Objects.requireNonNull(getCommand("sat")).setExecutor(this);
         
@@ -143,20 +126,16 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, net.md_5.bungee.api.chat.TextComponent.fromLegacyText(message));
     }
 
-    // Actionbar üzerinde maden sürelerinin kalıcı olarak dönmesi
     private void startGlobalActionbarTask() {
         new BukkitRunnable() {
             @Override
             public void run() {
                 if (registeredMadens.isEmpty()) return;
-                
-                // Aktif madenlerin sürelerini birleştirip actionbar'da gösterelim
                 StringBuilder sb = new StringBuilder();
                 for (String maden : registeredMadens) {
                     int kalan = madenKalanSureler.getOrDefault(maden, 0);
                     sb.append(ChatColor.YELLOW).append(maden.toUpperCase()).append(": ").append(ChatColor.RED).append(kalan).append("s   ");
                 }
-
                 String text = sb.toString().trim();
                 if (!text.isEmpty()) {
                     for (Player p : Bukkit.getOnlinePlayers()) {
@@ -259,28 +238,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             }
             playerIrpPage.put(p.getUniqueId(), 0);
             openIrpMenu(p, 0);
-            return true;
-        }
-
-        if (command.getName().equalsIgnoreCase("tagizinver")) {
-            if (!sender.hasPermission("maden.admin")) return true;
-            if (args.length < 3) {
-                sender.sendMessage(ChatColor.RED + "Kullanım: /tagizinver <rol> <izin> <true/false>");
-                return true;
-            }
-            if (luckPerms == null) {
-                sender.sendMessage(ChatColor.RED + "LuckPerms eklentisi aktif değil!");
-                return true;
-            }
-            Group group = luckPerms.getGroupManager().getGroup(args[0]);
-            if (group == null) {
-                sender.sendMessage(ChatColor.RED + "Böyle bir rol bulunamadı!");
-                return true;
-            }
-            boolean val = Boolean.parseBoolean(args[2]);
-            group.data().add(Node.builder(args[1]).value(val).build());
-            luckPerms.getGroupManager().saveGroup(group);
-            sender.sendMessage(ChatColor.GREEN + "'" + args[0] + "' rolünün izni güncellendi.");
             return true;
         }
 
