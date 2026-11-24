@@ -126,16 +126,18 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, net.md_5.bungee.api.chat.TextComponent.fromLegacyText(message));
     }
 
+    // Sadece süresi ayarlanmış (başlatılmış) madenler actionbar'da görünür
     private void startGlobalActionbarTask() {
         new BukkitRunnable() {
             @Override
             public void run() {
-                if (registeredMadens.isEmpty()) return;
+                if (madenKalanSureler.isEmpty()) return;
+                
                 StringBuilder sb = new StringBuilder();
-                for (String maden : registeredMadens) {
-                    int kalan = madenKalanSureler.getOrDefault(maden, 0);
-                    sb.append(ChatColor.YELLOW).append(maden.toUpperCase()).append(": ").append(ChatColor.RED).append(kalan).append("s   ");
+                for (Map.Entry<String, Integer> entry : madenKalanSureler.entrySet()) {
+                    sb.append(ChatColor.YELLOW).append(entry.getKey().toUpperCase()).append(": ").append(ChatColor.RED).append(entry.getValue()).append("s   ");
                 }
+
                 String text = sb.toString().trim();
                 if (!text.isEmpty()) {
                     for (Player p : Bukkit.getOnlinePlayers()) {
@@ -454,7 +456,28 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             if (points[0] != null && points[1] != null) {
                 String name = creatingMaden.get(player.getUniqueId());
                 registeredMadens.add(name);
-                player.sendMessage(ChatColor.GOLD + "'" + name + "' madeni oluşturuldu!");
+
+                // DÜZELTME: Alan oluşturulurken bloklar havaya (AIR) dönüştürülmüyor, olduğu gibi bırakılıyor!
+                Location p1 = points[0];
+                Location p2 = points[1];
+                int minX = Math.min(p1.getBlockX(), p2.getBlockX());
+                int maxX = Math.max(p1.getBlockX(), p2.getBlockX());
+                int minY = Math.min(p1.getBlockY(), p2.getBlockY());
+                int maxY = Math.max(p1.getBlockY(), p2.getBlockY());
+                int minZ = Math.min(p1.getBlockZ(), p2.getBlockZ());
+                int maxZ = Math.max(p1.getBlockZ(), p2.getBlockZ());
+
+                List<Block> blocks = new ArrayList<>();
+                for (int x = minX; x <= maxX; x++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        for (int z = minZ; z <= maxZ; z++) {
+                            blocks.add(p1.getWorld().getBlockAt(x, y, z));
+                        }
+                    }
+                }
+                madenBloklari.put(name, blocks);
+
+                player.sendMessage(ChatColor.GOLD + "'" + name + "' madeni başarıyla oluşturuldu! Şimdi /maden edit " + name + " ile miktar girip /maden " + name + " dagit yazabilirsin.");
                 creatingMaden.remove(player.getUniqueId());
                 selectionPoints.remove(player.getUniqueId());
             }
