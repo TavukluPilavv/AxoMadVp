@@ -12,6 +12,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action; // <-- Eksik olan Action importu eklendi!
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -54,7 +55,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
     private final Map<Material, Double> basePrices = new HashMap<>();
     private final Map<UUID, Boolean> autoSellMap = new HashMap<>();
     
-    // Kill Streak (Öldürme Serisi) Takibi
     private final Map<UUID, Integer> killStreaks = new HashMap<>();
 
     private final Set<UUID> editingChatInput = new HashSet<>();
@@ -573,28 +573,20 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         }
     }
 
-    // --- ÖLÜM VE ŞİMŞEK / KİLL STREAK (SERİ) SİSTEMİ ---
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         UUID victimUuid = victim.getUniqueId();
 
-        // Ölen kişinin serisini sıfırla
         killStreaks.put(victimUuid, 0);
-
-        // Ölen oyuncunun tam üstünde hasar vermeyen şimşek efekti çak
         victim.getWorld().strikeLightningEffect(victim.getLocation());
 
-        // Katili bul
         Player attacker = victim.getKiller();
         if (attacker != null && !attacker.equals(victim)) {
             UUID attackerUuid = attacker.getUniqueId();
-            
-            // Katilin serisini artır
             int currentStreak = killStreaks.getOrDefault(attackerUuid, 0) + 1;
             killStreaks.put(attackerUuid, currentStreak);
 
-            // Ekranın ortasında 1.35 saniye (27 tick) görünecek şekilde Title gönder
             attacker.sendTitle(
                 ChatColor.DARK_RED + "" + ChatColor.BOLD + victim.getName() + " ÖLDÜRÜLDÜ!",
                 ChatColor.YELLOW + "Öldürme Serisi: " + ChatColor.GREEN + currentStreak,
