@@ -1,5 +1,6 @@
 package com.example.madenplugin;
 
+import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -12,7 +13,7 @@ import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action; // <-- Eksik olan Action importu eklendi!
+import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -24,6 +25,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
@@ -54,17 +56,21 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
     private final Map<Material, Double> basePrices = new HashMap<>();
     private final Map<UUID, Boolean> autoSellMap = new HashMap<>();
-    
     private final Map<UUID, Integer> killStreaks = new HashMap<>();
 
     private final Set<UUID> editingChatInput = new HashSet<>();
     private final Map<UUID, String> editingTargetMaden = new HashMap<>();
     private final Map<UUID, Material> editingTargetBlock = new HashMap<>();
 
+    private static Economy economy = null;
     private Scoreboard healthScoreboard;
 
     @Override
     public void onEnable() {
+        if (!setupEconomy()) {
+            getLogger().warning("Vault ekonomisi bulunamadı!");
+        }
+
         basePrices.put(Material.DIAMOND_ORE, 4.5);
         basePrices.put(Material.EMERALD_ORE, 6.0);
         basePrices.put(Material.GOLD_ORE, 3.5);
@@ -84,6 +90,18 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         Objects.requireNonNull(getCommand("sat")).setExecutor(this);
         
         getLogger().info("MadenPlugin başarıyla aktif edildi!");
+    }
+
+    private boolean setupEconomy() {
+        if (getServer().getPluginManager().getPlugin("Vault") == null) {
+            return false;
+        }
+        RegisteredServiceProvider<Economy> rsp = getServer().getServicesManager().getRegistration(Economy.class);
+        if (rsp == null) {
+            return false;
+        }
+        economy = rsp.getProvider();
+        return economy != null;
     }
 
     @Override
@@ -175,6 +193,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         activeMadenTimers.put(madenAdi, timerTask);
     }
 
+    // Seçilen alanın tamamını boşluk kalmayacak şekilde oranlara göre doldurur
     private void fillMadenRandomly(String madenName) {
         List<Block> blocks = madenBloklari.get(madenName);
         if (blocks == null || blocks.isEmpty()) return;
@@ -197,7 +216,8 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             if (chosenMat != null) {
                 b.setType(chosenMat);
             } else {
-                b.setType(Material.AIR);
+                // Eğer oran toplamı 100'ü bulmazsa ilk madeni seçerek boşluk kalmasını engelleriz
+                b.setType(oranlar.keySet().iterator().next());
             }
         }
     }
@@ -228,7 +248,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         Player player = (Player) sender;
 
         if (args.length == 0) {
-            openMadenMenu(player);
+            openMadenMenu(player); // Doğrudan menüyü açar
             return true;
         }
 
@@ -304,7 +324,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             }
 
             fillMadenRandomly(madenName);
-            player.sendMessage(ChatColor.GREEN + "'" + madenName + "' madeni ayarlanan oranlara göre başarıyla dağıtıldı!");
+            player.sendMessage(ChatColor.GREEN + "'" + madenName + "' madeni boşluk kalmayacak şekilde başarıyla dağıtıldı!");
             return true;
         }
 
@@ -358,6 +378,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         return null;
     }
 
+    // Blok Kazıldığında Otomatik Satış, Vault & AxoScoreboard Güncellemesi ve Özel Actionbar
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
@@ -377,6 +398,11 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
                 boolean isVipMaden = player.getWorld().getName().toLowerCase().contains("vip");
                 if (isVipMaden || player.hasPermission("maden.vip")) {
                     finalPrice *= 2.0;
+                }
+
+                // Vault ekonomisine para ekleme ve scoreboard yenilenmesini tetikleme
+                if (economy != null) {
+                    economy.depositPlayer(player, finalPrice);
                 }
 
                 String formattedPrice = String.format(Locale.US, "%.2f", finalPrice);
