@@ -41,13 +41,19 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
     private final Map<UUID, String> creatingMaden = new HashMap<>();
     private final Map<UUID, Location[]> selectionPoints = new HashMap<>();
+    
+    // Savaş sistemi için veri yapıları
     private final Map<UUID, UUID> combatMap = new HashMap<>();
+    private final Map<UUID, BukkitRunnable> combatTasks = new HashMap<>();
     private final Map<UUID, BossBar> combatBossBars = new HashMap<>();
     
     private final Set<String> registeredMadens = new HashSet<>();
     private final Map<String, Integer> madenSureleri = new HashMap<>();
     private final Map<String, Map<Material, Integer>> madenOranlari = new HashMap<>();
     private final Map<String, List<Block>> madenBloklari = new HashMap<>();
+    
+    // Maden koordinat sınırları (Bölgede olup olmadığını kontrol etmek için)
+    private final Map<String, Location[]> madenSinirlari = new HashMap<>();
     
     private final Map<String, BukkitRunnable> activeMadenTimers = new HashMap<>();
     private final Map<String, Integer> madenKalanSureler = new HashMap<>();
@@ -64,7 +70,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
     @Override
     public void onEnable() {
-        // İstediğin madenler ve 0.1 - 8.5 arası baz fiyatlandırmaları
         basePrices.put(Material.DIAMOND_ORE, 4.5);
         basePrices.put(Material.EMERALD_ORE, 6.0);
         basePrices.put(Material.GOLD_ORE, 3.5);
@@ -75,7 +80,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         basePrices.put(Material.COAL_ORE, 1.0);
 
         setupHealthScoreboard();
-        startGlobalActionbarTask();
+        startPlayerLocationCheckTask();
 
         getServer().getPluginManager().registerEvents(this, this);
         Objects.requireNonNull(getCommand("maden")).setExecutor(this);
@@ -104,26 +109,53 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR, net.md_5.bungee.api.chat.TextComponent.fromLegacyText(message));
     }
 
-    // Sadece /maden sure komutu girilmiş madenler actionbar üzerinde kalıcı olarak görünür
-    private void startGlobalActionbarTask() {
+    // Oyuncu sadece maden bölgesindeyse Actionbar'da renkli süre görünür
+    private void startPlayerLocationCheckTask() {
         new BukkitRunnable() {
             @Override
             public void run() {
                 if (madenKalanSureler.isEmpty()) return;
-                
-                StringBuilder sb = new StringBuilder();
-                for (Map.Entry<String, Integer> entry : madenKalanSureler.entrySet()) {
-                    sb.append(ChatColor.YELLOW).append(entry.getKey().toUpperCase()).append(": ").append(ChatColor.RED).append(entry.getValue()).append("s   ");
-                }
 
-                String text = sb.toString().trim();
-                if (!text.isEmpty()) {
-                    for (Player p : Bukkit.getOnlinePlayers()) {
-                        sendActionBar(p, text);
+                for (Player player : Bukkit.getOnlinePlayers()) {
+                    Location loc = player.getLocation();
+                    String currentMaden = null;
+
+                    for (String madenName : registeredMadens) {
+                        Location[] bounds = madenSinirlari.get(madenName);
+                        if (bounds == null) continue;
+
+                        Location p1 = bounds[0];
+                        Location p2 = bounds[1];
+
+                        if (loc.getWorld().equals(p1.getWorld())) {
+                            int x = loc.getBlockX();
+                            int y = loc.getBlockY();
+                            int z = loc.getBlockZ();
+
+                            int minX = Math.min(p1.getBlockX(), p2.getBlockX());
+                            int maxX = Math.max(p1.getBlockX(), p2.getBlockX());
+                            int minY = Math.min(p1.getBlockY(), p2.getBlockY());
+                            int maxY = Math.max(p1.getBlockY(), p2.getBlockY());
+                            int minZ = Math.min(p1.getBlockZ(), p2.getBlockZ());
+                            int maxZ = Math.max(p1.getBlockZ(), p2.getBlockZ());
+
+                            if (x >= minX && x <= maxX && y >= minY && y <= maxY && z >= minZ && z <= maxZ) {
+                                currentMaden = madenName;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Eğer oyuncu maden içindeyse actionbar'da renkli göster
+                    if (currentMaden != null && madenKalanSureler.containsKey(currentMaden)) {
+                        int kalan = madenKalanSureler.get(currentMaden);
+                        String msg = ChatColor.GOLD + "" + ChatColor.BOLD + currentMaden.toUpperCase() + " MADENİ " + 
+                                     ChatColor.YELLOW + "Yenilenmesine: " + ChatColor.RED + kalan + "s";
+                        sendActionBar(player, msg);
                     }
                 }
             }
-        }.runTaskTimer(this, 0L, 20L);
+        }.runTaskTimer(this, 0L, 10L); // Her yarım saniyede bir kontrol eder
     }
 
     @EventHandler
@@ -143,6 +175,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
     public void onQuit(PlayerQuitEvent event) {
         Player p = event.getPlayer();
         killStreaks.remove(p.getUniqueId());
+        combatMap.remove(p.getUniqueId());
         event.setQuitMessage(null);
         for (Player online : Bukkit.getOnlinePlayers()) {
             sendActionBar(online, ChatColor.RED + "- " + p.getName() + " sunucudan ayrıldı.");
@@ -176,7 +209,6 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         activeMadenTimers.put(madenAdi, timerTask);
     }
 
-    // Seçilen alanın içinde HİÇBİR BOŞLUK KALMAYACAK şekilde tamamen doldurulması
     private void fillMadenRandomly(String madenName) {
         List<Block> blocks = madenBloklari.get(madenName);
         if (blocks == null || blocks.isEmpty()) return;
@@ -230,7 +262,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         Player player = (Player) sender;
 
         if (args.length == 0) {
-            openMadenMenu(player); // /maden yazıldığında doğrudan menü açılır
+            openMadenMenu(player);
             return true;
         }
 
@@ -269,6 +301,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             registeredMadens.remove(madenName);
             madenOranlari.remove(madenName);
             madenBloklari.remove(madenName);
+            madenSinirlari.remove(madenName);
             madenSureleri.remove(madenName);
             madenKalanSureler.remove(madenName);
             if (activeMadenTimers.containsKey(madenName)) {
@@ -360,7 +393,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         return null;
     }
 
-    // Blok Kazıldığında Otomatik Satış, AxoScoreboard Uyumlu Ekonomi ve Yeşil Actionbar Bildirimi (Max 8.5)
+    // Blok Kazıldığında Sessiz Satış, Scoreboard Uyumlu Eco Give ve Sadece Kazan Kişiye Yeşil Actionbar
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
@@ -372,7 +405,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
                 double basePrice = basePrices.get(type);
                 Random rand = new Random();
-                double fluctuation = (rand.nextDouble() * 0.4) - 0.2; // 0.1, 0.2 gibi ufak oynamalar
+                double fluctuation = (rand.nextDouble() * 0.4) - 0.2;
                 double finalPrice = basePrice + fluctuation;
                 if (finalPrice < 0.1) finalPrice = 0.1;
                 if (finalPrice > 8.5) finalPrice = 8.5; // En fazla 8.5
@@ -384,9 +417,10 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
                 String formattedPrice = String.format(Locale.US, "%.2f", finalPrice);
                 
-                // Skor tahtasının ve ekonomi eklentisinin parayı anında yakalamasını sağlar
+                // AxoScoreboard ve ekonomi sisteminin parayı anında yakalaması için konsol komutu
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "eco give " + player.getName() + " " + formattedPrice);
 
+                // Sohbet kirliliği önlendi, sadece kazan kişiye özel yeşil actionbar
                 sendActionBar(player, ChatColor.GREEN + "+" + formattedPrice + " TL (" + type.name() + " satıldı!)");
             }
         }
@@ -478,6 +512,8 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
 
                 Location p1 = points[0];
                 Location p2 = points[1];
+                madenSinirlari.put(name, new Location[]{p1, p2});
+
                 int minX = Math.min(p1.getBlockX(), p2.getBlockX());
                 int maxX = Math.max(p1.getBlockX(), p2.getBlockX());
                 int minY = Math.min(p1.getBlockY(), p2.getBlockY());
@@ -569,27 +605,85 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
         }
     }
 
+    // --- GELİŞMİŞ SAVAŞ (COMBAT LOG) SİSTEMİ ---
     @EventHandler
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
         if (event.getEntity() instanceof Player && event.getDamager() instanceof Player) {
             Player victim = (Player) event.getEntity();
             Player attacker = (Player) event.getDamager();
-            if (!victim.equals(attacker)) {
-                combatMap.put(victim.getUniqueId(), attacker.getUniqueId());
+            if (victim.equals(attacker)) return;
+
+            // Eğer ilk defa savaşa giriyorsa uyarı gönder
+            if (!combatMap.containsKey(victim.getUniqueId())) {
+                victim.sendMessage(ChatColor.RED + "" + ChatColor.BOLD + attacker.getName() + " adlı oyuncuyla çatışmaya girdin! Sakın oyundan çıkma yoksa cezalandırılacaksın!");
             }
+            if (!combatMap.containsKey(attacker.getUniqueId())) {
+                attacker.sendMessage(ChatColor.RED + "" + ChatColor.BOLD + victim.getName() + " adlı oyuncuyla çatışmaya girdin! Sakın oyundan çıkma yoksa cezalandırılacaksın!");
+            }
+
+            combatMap.put(victim.getUniqueId(), attacker.getUniqueId());
+            combatMap.put(attacker.getUniqueId(), victim.getUniqueId());
+
+            startOrRefreshCombat(victim);
+            startOrRefreshCombat(attacker);
         }
     }
 
-    // --- ÖLÜM, HASAR VERMEYEN ŞİMŞEK VE KİLL STREAK (SERİ) SİSTEMİ ---
+    private void startOrRefreshCombat(Player player) {
+        UUID uuid = player.getUniqueId();
+        if (combatTasks.containsKey(uuid)) {
+            combatTasks.get(uuid).cancel();
+        }
+
+        BossBar bossBar = combatBossBars.get(uuid);
+        if (bossBar == null) {
+            bossBar = Bukkit.createBossBar(ChatColor.RED + "Savaşta!", BarColor.RED, BarStyle.SOLID);
+            bossBar.addPlayer(player);
+            combatBossBars.put(uuid, bossBar);
+        }
+
+        final double[] timeLeft = {10.0}; // 10 saniye savaş süresi
+        BossBar finalBossBar = bossBar;
+
+        BukkitRunnable task = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (timeLeft[0] <= 0) {
+                    finalBossBar.removeAll();
+                    combatBossBars.remove(uuid);
+                    combatMap.remove(uuid);
+                    player.sendMessage(ChatColor.GREEN + "Artık çatışmada değilsin, komut yazabilirsin.");
+                    this.cancel();
+                    return;
+                }
+                String formattedTime = String.format(Locale.US, "%.1f", timeLeft[0]);
+                finalBossBar.setTitle(ChatColor.YELLOW + "Savaşta! Kalan: " + ChatColor.RED + formattedTime + "s");
+                finalBossBar.setProgress(Math.max(0.0, Math.min(1.0, timeLeft[0] / 10.0)));
+                timeLeft[0] -= 0.5;
+            }
+        };
+        combatTasks.put(uuid, task);
+        task.runTaskTimer(this, 0L, 10L);
+    }
+
+    // --- ÖLÜM, ŞİMŞEK VE KİLL STREAK (SERİ) SİSTEMİ ---
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player victim = event.getEntity();
         UUID victimUuid = victim.getUniqueId();
 
-        // Ölen kişinin serisini sıfırla
         killStreaks.put(victimUuid, 0);
+        combatMap.remove(victimUuid);
+        if (combatTasks.containsKey(victimUuid)) {
+            combatTasks.get(victimUuid).cancel();
+            combatTasks.remove(victimUuid);
+        }
+        if (combatBossBars.containsKey(victimUuid)) {
+            combatBossBars.get(victimUuid).removeAll();
+            combatBossBars.remove(victimUuid);
+        }
 
-        // Ölen oyuncunun tam üstünde hasar vermeyen görsel şimşek çakar
+        // Ölen oyuncunun tam üstünde hasar vermeyen şimşek çakar
         victim.getWorld().strikeLightningEffect(victim.getLocation());
 
         Player attacker = victim.getKiller();
@@ -598,7 +692,7 @@ public final class MadenPlugin extends JavaPlugin implements Listener, CommandEx
             int currentStreak = killStreaks.getOrDefault(attackerUuid, 0) + 1;
             killStreaks.put(attackerUuid, currentStreak);
 
-            // 1.35 saniye (27 tick) ekranda kalacak şık tasarım başlık
+            // Ekranın ortasında 1.35 saniye (27 tick) görünecek şık başlık
             attacker.sendTitle(
                 ChatColor.DARK_RED + "" + ChatColor.BOLD + victim.getName() + " ÖLDÜRÜLDÜ!",
                 ChatColor.YELLOW + "Öldürme Serisi: " + ChatColor.GREEN + currentStreak,
